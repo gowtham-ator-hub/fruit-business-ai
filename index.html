@@ -571,11 +571,11 @@
       <div class="panel process-panel" id="processPanel">
         <div><h3 data-i18n="readyCalculate">Ready to calculate?</h3><p data-i18n="providerHelp">Choose the provider whose key you saved. Nothing is auto-detected.</p></div>
         <div class="ai-actions">
-          <button class="button primary" id="cloudflareCalculate" type="button">✦ <span data-i18n="calculate">Calculate</span></button>        </div>
+          <button class="button primary" id="cloudflareCalculate" type="button">✦ <span data-i18n="calculate">Calculate</span></button>
+        </div>
       </div>
       <div class="message" id="aiMessage" role="status" aria-live="polite"></div>
-      <article class="result-card" id="resultCard" aria-live="polite"></article>
-    </section>
+      <article class="result-card" id="resultCard" aria-live="polite"></article>    </section>
 
     <section class="page" id="page-books" data-page="books">
       <div class="section-head"><div><p class="eyebrow" data-i18n="booksEyebrow">Your records</p><h2 data-i18n="booksTitle">Books</h2><p data-i18n="booksBody">Every AI result is filed here automatically.</p></div></div>
@@ -938,7 +938,8 @@
       function buildGlossaryWords(limit = 60) {
         const terms = state.vocabulary || [];
         const words = new Set();
-        terms.slice(0, limit).forEach(item => { ["en","kn","te","hi","mr"].forEach(lang => { if (item[lang]) words.add(item[lang]); }); });        return Array.from(words).join(", ");
+        terms.slice(0, limit).forEach(item => { ["en","kn","te","hi","mr"].forEach(lang => { if (item[lang]) words.add(item[lang]); }); });
+        return Array.from(words).join(", ");
       }
 
       function buildGlossaryMapping(limit = 40) {
@@ -947,8 +948,7 @@
         return terms.map(item => {
           const local = ["kn","te","hi","mr"].filter(lang => item[lang]).map(lang => `${lang}:${item[lang]}`).join(",");
           const aliasPart = item.aliases ? ` aliases:${item.aliases}` : "";
-          return `${item.en}[${local}${aliasPart}]`;
-        }).join("; ");
+          return `${item.en}[${local}${aliasPart}]`;        }).join("; ");
       }
 
       function detectScripts(text) {
@@ -1019,7 +1019,7 @@
       }
 
       async function requestCloudflare(accountId, key) {
-        const prompt = `${systemPrompt}\n\n${buildUserText()}`;
+        const prompt = `${systemPrompt}\n\n${buildUserText()}\n\nRespond with ONLY the JSON object. Do not include any words, explanation, or markdown code fences before or after it. Your entire reply must start with { and end with }.`;
         const body = { prompt, temperature:0 };
         if (photoData) {
           const base64 = photoData.dataUrl.split(",")[1];
@@ -1063,11 +1063,19 @@
       }
 
       function parseStrictJson(raw) {
-        try { return JSON.parse(raw); }
-        catch {
-          const cleaned = String(raw).replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
-          try { return JSON.parse(cleaned); } catch { throw new Error("The AI response was not valid JSON. Please try again with a clearer photo or wording."); }
+        const text = String(raw ?? "").trim();
+        const candidates = [text, text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim()];
+        const firstBrace = text.indexOf("{");
+        const lastBrace = text.lastIndexOf("}");
+        if (firstBrace !== -1 && lastBrace > firstBrace) candidates.push(text.slice(firstBrace, lastBrace + 1));
+
+        for (const candidate of candidates) {
+          try { return JSON.parse(candidate); } catch {}
+          try { return JSON.parse(candidate.replace(/,(\s*[}\]])/g, "$1")); } catch {}
         }
+
+        const snippet = text.slice(0, 220).replace(/\s+/g, " ");
+        throw new Error(`The AI response was not valid JSON. Please try again with a clearer photo or wording.${snippet ? ` (Model said: "${snippet}${text.length > 220 ? "…" : ""}")` : ""}`);
       }
 
       function normalizeEntry(data, provider) {
@@ -1141,8 +1149,8 @@
       function renderPnl() {
         const start = rangeStart(currentRange);
         const entries = state.entries.filter(entry => new Date(entry.createdAt) >= start);
-        const sales = entries.filter(entry => entry.entryType === "sale").reduce((sum, entry) => sum + entry.total, 0);
-        const purchases = entries.filter(entry => entry.entryType === "purchase").reduce((sum, entry) => sum + entry.total, 0);        const itemProfit = entries.reduce((sum, entry) => sum + entry.profit, 0);
+        const sales = entries.filter(entry => entry.entryType === "sale").reduce((sum, entry) => sum + entry.total, 0);        const purchases = entries.filter(entry => entry.entryType === "purchase").reduce((sum, entry) => sum + entry.total, 0);
+        const itemProfit = entries.reduce((sum, entry) => sum + entry.profit, 0);
         const net = sales - purchases;
         $("#pnlNet").textContent = money(net); $("#pnlSales").textContent = money(sales); $("#pnlPurchases").textContent = money(purchases); $("#pnlItemProfit").textContent = money(itemProfit); $("#pnlEntries").textContent = entries.length;
         const days = Array.from({ length:7 }, (_, offset) => { const date = localDay(new Date()); date.setDate(date.getDate() - (6 - offset)); const dayEntries = entries.filter(entry => localDay(entry.createdAt).getTime() === date.getTime()); return { label:date.toLocaleDateString([], { weekday:"short" }), value:dayEntries.reduce((sum, entry) => sum + (entry.entryType === "sale" ? entry.total : -entry.total), 0) }; });
